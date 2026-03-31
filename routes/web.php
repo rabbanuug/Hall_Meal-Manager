@@ -38,6 +38,8 @@ Route::middleware(['auth', 'verified'])->group(function () {
         Route::get('students/create', [StudentRegistrationController::class, 'create'])->name('students.create');
         Route::post('students', [StudentRegistrationController::class, 'store'])->name('students.store');
         Route::post('students/bulk', [StudentRegistrationController::class, 'bulkStore'])->name('students.bulk');
+        Route::post('students/bulk-validate', [StudentRegistrationController::class, 'validateBulk'])->name('students.bulk-validate');
+        Route::get('students/export', [StudentRegistrationController::class, 'exportPdf'])->name('students.export');
         Route::put('students/{student}', [StudentRegistrationController::class, 'update'])->name('students.update');
 
         // Teachers
@@ -72,6 +74,16 @@ Route::middleware(['auth', 'verified'])->group(function () {
 
         // Status Management
         Route::post('members/{user}/toggle-status', [\App\Http\Controllers\Admin\MemberStatusController::class, 'toggle'])->name('members.toggle-status');
+
+        // Manual Booking
+        Route::get('manual-booking', [\App\Http\Controllers\Admin\ManualBookingController::class, 'index'])->name('manual-booking.index');
+        Route::get('manual-booking/search', [\App\Http\Controllers\Admin\ManualBookingController::class, 'searchStudent'])->name('manual-booking.search');
+        Route::post('manual-booking', [\App\Http\Controllers\Admin\ManualBookingController::class, 'store'])->name('manual-booking.store');
+
+        // Student Password Reset
+        Route::get('student-password', [\App\Http\Controllers\Admin\StudentPasswordController::class, 'index'])->name('student-password.index');
+        Route::get('student-password/search', [\App\Http\Controllers\Admin\StudentPasswordController::class, 'search'])->name('student-password.search');
+        Route::post('student-password', [\App\Http\Controllers\Admin\StudentPasswordController::class, 'update'])->name('student-password.update');
     });
 
     // Student Routes

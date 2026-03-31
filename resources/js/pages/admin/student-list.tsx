@@ -1,4 +1,4 @@
-import { Head, Link, router } from '@inertiajs/react';
+import { Head, Link, router, usePage } from '@inertiajs/react';
 import AppLayout from '@/layouts/app-layout';
 import admin from '@/routes/admin';
 import { type BreadcrumbItem } from '@/types';
@@ -9,8 +9,8 @@ import { Badge } from '@/components/ui/badge';
 import BulkImportModal from '@/components/bulk-import-modal';
 import EditStudentModal from '@/components/edit-student-modal';
 import DepositBalanceModal from '@/components/deposit-balance-modal';
-import { Pencil, Search, Wallet, UserMinus, UserCheck, ShieldAlert } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { Pencil, Search, Wallet, UserMinus, UserCheck, ShieldAlert, Printer, ChevronUp, ChevronDown } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 
 export default function StudentList({ students, filters, halls, selectedHallId, memberType }: { students: any[], filters: any, halls?: any[], selectedHallId?: number, memberType: 'student' | 'teacher' | 'staff' }) {
     const memberTypeTitle = memberType === 'student' ? 'Students' : memberType === 'teacher' ? 'Teachers' : 'Staffs';
@@ -28,6 +28,43 @@ export default function StudentList({ students, filters, halls, selectedHallId, 
     const [editModalOpen, setEditModalOpen] = useState(false);
     const [depositModalOpen, setDepositModalOpen] = useState(false);
     const [search, setSearch] = useState(filters.search || '');
+
+    const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' } | null>({
+        key: 'unique_id',
+        direction: 'asc'
+    });
+
+    const sortedStudents = useMemo(() => {
+        let sortableItems = [...students];
+        if (sortConfig !== null) {
+            sortableItems.sort((a, b) => {
+                const aValue = (a[sortConfig.key] || '').toString().toLowerCase();
+                const bValue = (b[sortConfig.key] || '').toString().toLowerCase();
+                
+                if (aValue < bValue) {
+                    return sortConfig.direction === 'asc' ? -1 : 1;
+                }
+                if (aValue > bValue) {
+                    return sortConfig.direction === 'asc' ? 1 : -1;
+                }
+                return 0;
+            });
+        }
+        return sortableItems;
+    }, [students, sortConfig]);
+
+    const requestSort = (key: string) => {
+        let direction: 'asc' | 'desc' = 'asc';
+        if (sortConfig && sortConfig.key === key && sortConfig.direction === 'asc') {
+            direction = 'desc';
+        }
+        setSortConfig({ key, direction });
+    };
+
+    const getSortIcon = (key: string) => {
+        if (!sortConfig || sortConfig.key !== key) return <ChevronDown className="h-3 w-3 ml-1 opacity-20" />;
+        return sortConfig.direction === 'asc' ? <ChevronUp className="h-3 w-3 ml-1 text-primary" /> : <ChevronDown className="h-3 w-3 ml-1 text-primary" />;
+    };
 
     useEffect(() => {
         const timer = setTimeout(() => {
@@ -55,7 +92,7 @@ export default function StudentList({ students, filters, halls, selectedHallId, 
     const toggleStatus = (student: any) => {
         const action = student.status === 'ex' ? 'Reactivate' : 'Mark as Ex-User';
         if (confirm(`Are you sure you want to ${action} this member? ${action === 'Mark as Ex-User' ? 'Clearance check will be performed.' : ''}`)) {
-            router.post(route('admin.members.toggle-status', student.user_id), {}, {
+            router.post(admin.members.toggleStatus(student.user_id).url, {}, {
                 onError: () => alert('Action failed. Check for dues.')
             });
         }
@@ -90,7 +127,15 @@ export default function StudentList({ students, filters, halls, selectedHallId, 
                                     ))}
                                 </select>
                             )}
-                            <BulkImportModal />
+                            <Button
+                                variant="outline"
+                                onClick={() => window.open(`/admin/students/export?search=${search}&hall_id=${selectedHallId}`, '_blank')}
+                                className="flex items-center gap-2"
+                            >
+                                <Printer className="h-4 w-4" />
+                                Print List
+                            </Button>
+                            <BulkImportModal hallId={selectedHallId} />
                             <Button asChild>
                                 <Link href={admin.students.create().url}>Register New Member</Link>
                             </Button>
@@ -100,24 +145,36 @@ export default function StudentList({ students, filters, halls, selectedHallId, 
 
                 <Card>
                     <CardHeader>
-                        <CardTitle>{memberTypeTitle} in Your Hall</CardTitle>
+                        <CardTitle>{memberTypeTitle} in Your Hall ({students.length})</CardTitle>
                     </CardHeader>
                     <CardContent>
                         <div className="relative w-full overflow-auto">
                             <table className="w-full text-sm">
                                 <thead>
                                     <tr className="border-b">
-                                        <th className="h-10 px-2 text-left text-xs uppercase text-muted-foreground">UID</th>
-                                        <th className="h-10 px-2 text-left text-xs uppercase text-muted-foreground">ID / Ref</th>
-                                        <th className="h-10 px-2 text-left text-xs uppercase text-muted-foreground">Name</th>
-                                        <th className="h-10 px-2 text-left text-xs uppercase text-muted-foreground">Dept / Desig</th>
-                                        <th className="h-10 px-2 text-left text-xs uppercase text-muted-foreground">Status</th>
-                                        <th className="h-10 px-2 text-left text-xs uppercase text-muted-foreground">Balance</th>
+                                        <th className="h-10 px-2 text-left text-xs uppercase text-muted-foreground cursor-pointer hover:bg-muted/50" onClick={() => requestSort('unique_id')}>
+                                            <div className="flex items-center">UID {getSortIcon('unique_id')}</div>
+                                        </th>
+                                        <th className="h-10 px-2 text-left text-xs uppercase text-muted-foreground cursor-pointer hover:bg-muted/50" onClick={() => requestSort('student_id')}>
+                                            <div className="flex items-center">ID / Ref {getSortIcon('student_id')}</div>
+                                        </th>
+                                        <th className="h-10 px-2 text-left text-xs uppercase text-muted-foreground cursor-pointer hover:bg-muted/50" onClick={() => requestSort('name')}>
+                                            <div className="flex items-center">Name {getSortIcon('name')}</div>
+                                        </th>
+                                        <th className="h-10 px-2 text-left text-xs uppercase text-muted-foreground cursor-pointer hover:bg-muted/50" onClick={() => requestSort('department')}>
+                                            <div className="flex items-center">Dept / Desig {getSortIcon('department')}</div>
+                                        </th>
+                                        <th className="h-10 px-2 text-left text-xs uppercase text-muted-foreground cursor-pointer hover:bg-muted/50" onClick={() => requestSort('status')}>
+                                            <div className="flex items-center">Status {getSortIcon('status')}</div>
+                                        </th>
+                                        <th className="h-10 px-2 text-left text-xs uppercase text-muted-foreground cursor-pointer hover:bg-muted/50" onClick={() => requestSort('balance')}>
+                                            <div className="flex items-center">Balance {getSortIcon('balance')}</div>
+                                        </th>
                                         <th className="h-10 px-2 text-left text-xs uppercase text-muted-foreground text-right">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {students.map((student: any) => (
+                                    {sortedStudents.map((student: any) => (
                                         <tr key={student.id} className={`border-b group hover:bg-muted/50 transition-colors ${student.status === 'ex' ? 'opacity-60 bg-muted/20' : ''}`}>
                                             <td className="p-2 font-mono text-xs font-semibold text-primary">{student.unique_id || '-'}</td>
                                             <td className="p-2 font-mono text-xs">{student.student_id}</td>

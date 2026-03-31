@@ -20,23 +20,23 @@
         }
 
         .hall-name {
-            font-size: 28px;
+            font-size: 20px;
             font-weight: normal;
-            display: inline-block;
+            display: block;
         }
 
         .meal-type-title {
-            font-size: 28px;
+            font-size: 18px;
             font-weight: normal;
-            display: inline-block;
+            display: block;
             text-transform: capitalize;
         }
 
         .header-date {
             font-size: 11px;
             color: #777;
-            display: inline-block;
-            margin-left: 10px;
+            display: block;
+            margin-top: 5px;
         }
 
         .section-title {
@@ -118,8 +118,8 @@
             <div class="{{ $loop->last ? '' : 'page-break' }}">
                 <div class="header">
                     <span class="hall-name">{{ $hall->name }}</span>
-                    <span class="meal-type-title">{{ \App\Models\MealBooking::getMealAlias($mealType) }}</span>
-                    <span class="header-date">| {{ \Carbon\Carbon::parse($date)->format('D M d Y') }} 00:00:00 GMT+0600 (Bangladesh Standard Time)</span>
+                    <span class="meal-type-title">{{ \App\Models\MealBooking::getMealAlias($mealType) }} ({{ \Carbon\Carbon::parse($date)->format('d M Y') }})</span>
+                    <span class="header-date">Printed at: {{ \Carbon\Carbon::now()->format('D M d Y H:i:s') }}</span>
                 </div>
 
                 <div class="section-title">
@@ -154,7 +154,7 @@
                 </table>
 
                 <div class="section-title" style="margin-top: 30px;">
-                    Teachers Meals[Total: {{ $mealData['others']->count() }} 
+                    Teachers & Staff Meals[Total: {{ $mealData['others']->count() }} 
                     (m-{{ $mealData['other_mutton'] }}, b-{{ $mealData['other_beef'] }})]
                 </div>
 

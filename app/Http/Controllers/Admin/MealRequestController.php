@@ -108,19 +108,21 @@ class MealRequestController extends Controller
             $hallId = $request->query('hall_id', Hall::first()?->id);
         }
 
-        $hall = Hall::findOrFail($hallId);
-        $tomorrow = Carbon::tomorrow()->toDateString();
+        $date = $request->query('date', Carbon::tomorrow()->toDateString());
 
-        $mealTypes = ['breakfast', 'lunch', 'dinner'];
+        $hall = Hall::findOrFail($hallId);
+
+        $mealType = $request->query('meal_type');
+        $mealTypes = $mealType ? [$mealType] : ['breakfast', 'lunch', 'dinner'];
         $data = [];
 
         foreach ($mealTypes as $type) {
             $bookings = MealBooking::with(['user.student', 'user.teacher', 'user.staff'])
                 ->where('hall_id', $hallId)
-                ->where('booking_date', $tomorrow)
+                ->where('booking_date', $date)
                 ->where('meal_type', $type)
                 ->get()
-                ->map(function ($booking) {
+                ->map(function ($booking) use ($hall) {
                     $user = $booking->user;
                     $memberId = 'N/A';
                     $preference = 'beef';
@@ -147,7 +149,7 @@ class MealRequestController extends Controller
                         'quantity' => $booking->quantity,
                         'details' => trim($details, ','),
                     ];
-                });
+                })->sortBy('member_id')->values();
 
             $students = $bookings->filter(fn($b) => $b['user_type'] === 'student')->values();
             $others = $bookings->filter(fn($b) => $b['user_type'] !== 'student')->values();
@@ -165,10 +167,15 @@ class MealRequestController extends Controller
 
         $pdf = Pdf::loadView('pdf.meal-list', [
             'hall' => $hall,
-            'date' => $tomorrow,
+            'date' => $date,
             'data' => $data,
         ]);
 
-        return $pdf->download("meal-list-{$hall->name}-{$tomorrow}.pdf");
+        $filename = "meal-list-{$hall->name}-{$date}";
+        if ($mealType) {
+            $filename .= "-{$mealType}";
+        }
+
+        return $pdf->download("{$filename}.pdf");
     }
 }

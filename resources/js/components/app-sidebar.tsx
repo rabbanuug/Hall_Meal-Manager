@@ -1,5 +1,5 @@
 import { Link, usePage } from '@inertiajs/react';
-import { BookOpen, Folder, LayoutGrid, Users, Utensils } from 'lucide-react';
+import { BookOpen, Calendar, Folder, Key, LayoutGrid, Users, Utensils } from 'lucide-react';
 
 import { NavFooter } from '@/components/nav-footer';
 import { NavMain } from '@/components/nav-main';
@@ -59,6 +59,16 @@ export function AppSidebar() {
             title: 'Monthly Costs',
             href: '/admin/monthly-costs',
             icon: BookOpen,
+        });
+        mainNavItems.push({
+            title: 'Manual Booking',
+            href: '/admin/manual-booking',
+            icon: Calendar,
+        });
+        mainNavItems.push({
+            title: 'Change Password',
+            href: '/admin/student-password',
+            icon: Key,
         });
     }
 

@@ -2,6 +2,7 @@ import { Link } from '@inertiajs/react';
 import { type PropsWithChildren } from 'react';
 
 import AppLogoIcon from '@/components/app-logo-icon';
+import TutorialVideoModal from '@/components/TutorialVideoModal';
 import { home } from '@/routes';
 
 interface AuthLayoutProps {
@@ -40,6 +41,7 @@ export default function AuthSimpleLayout({
                     {children}
                 </div>
             </div>
+            <TutorialVideoModal />
         </div>
     );
 }

@@ -82,19 +82,17 @@ export default function AdminDashboard({ data, currentDate, tomorrowDate, halls,
                         </Button>
                     </div>
 
-                    {activeDate === 'tomorrow' && (
-                        <Button
-                            variant="outline"
-                            size="sm"
-                            className="gap-2 border-emerald-200 hover:bg-emerald-50 text-emerald-700"
-                            onClick={() => {
-                                window.location.href = `/admin/meal-requests/export?hall_id=${selectedHallId}`;
-                            }}
-                        >
-                            <FileDown className="h-4 w-4" />
-                            Export PDF
-                        </Button>
-                    )}
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        className="gap-2 border-emerald-200 hover:bg-emerald-50 text-emerald-700"
+                        onClick={() => {
+                            window.location.href = `/admin/meal-requests/export?hall_id=${selectedHallId}&date=${date}&meal_type=${activeTab}`;
+                        }}
+                    >
+                        <FileDown className="h-4 w-4" />
+                        Export PDF
+                    </Button>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

@@ -145,6 +145,9 @@ export default function StudentDashboard({ user, bookings, pastBookings, monthly
                                 <CalendarIcon className="h-5 w-5" />
                                 Plan Your Meals
                             </CardTitle>
+                            <p className="text-[11px] text-primary flex items-center gap-1 font-medium mt-1">
+                                <Info className="h-3 w-3" /> Booking & changes for tomorrow are allowed until 10:00 PM today.
+                            </p>
                         </CardHeader>
                         <CardContent>
                             <form onSubmit={submit} className="space-y-4">

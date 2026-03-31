@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 use App\Mail\MemberWelcomeMail;
 use Illuminate\Support\Str;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Inertia\Inertia;
 
 class StudentRegistrationController extends Controller
@@ -26,27 +27,26 @@ class StudentRegistrationController extends Controller
         }
 
         $query = Student::with('user')
-            ->whereHas('user', function ($q) use ($hallId) {
-                $q->where('hall_id', $hallId);
-            });
+            ->join('users', 'students.user_id', '=', 'users.id')
+            ->where('users.hall_id', $hallId)
+            ->select('students.*');
 
         if ($search) {
             $query->where(function ($q) use ($search) {
-                $q->where('student_id', 'like', "%{$search}%")
-                    ->orWhereHas('user', function ($uq) use ($search) {
-                        $uq->where('name', 'like', "%{$search}%");
-                    });
+                $q->where('students.student_id', 'like', "%{$search}%")
+                    ->orWhere('users.name', 'like', "%{$search}%")
+                    ->orWhere('users.unique_id', 'like', "%{$search}%");
             });
         }
 
-        $students = $query->get()->map(function ($student) {
+        $students = $query->orderBy('users.unique_id', 'asc')->get()->map(function ($student) {
             return [
                 'id' => $student->id,
                 'user_id' => $student->user_id,
                 'student_id' => $student->student_id,
                 'name' => $student->user->name,
                 'unique_id' => $student->user->unique_id,
-                'status' => $student->user->status, // Pass status too
+                'status' => $student->user->status,
                 'email' => $student->user->email,
                 'user_type' => 'student',
                 'department' => $student->department,
@@ -147,6 +147,21 @@ class StudentRegistrationController extends Controller
         }
     }
 
+    public function validateBulk(Request $request)
+    {
+        $request->validate([
+            'student_ids' => 'required|array',
+        ]);
+
+        $existingIds = Student::whereIn('student_id', $request->student_ids)
+            ->pluck('student_id')
+            ->toArray();
+
+        return response()->json([
+            'existing_ids' => $existingIds
+        ]);
+    }
+
     public function bulkStore(Request $request)
     {
         $request->validate([
@@ -156,23 +171,21 @@ class StudentRegistrationController extends Controller
             'students.*.department' => 'required|string',
             'students.*.batch' => 'required|string',
             'students.*.room_number' => 'required|string',
+            'hall_id' => 'nullable|exists:halls,id',
         ]);
 
         $currentUserHallId = auth()->user()->hall_id;
 
         try {
             DB::transaction(function () use ($request, $currentUserHallId) {
-                // Group by hall to optimize unique ID generation
-                // Just in case super admin sends mixed halls (though UI likely sends one)
-                // Assuming single hall for bulk import for simpler logic unless data contains hall_id
+                // Determine the hall for this batch
+                $hallId = $request->hall_id ?: (auth()->user()->role === 'super_admin' ? ($request->students[0]['hall_id'] ?? $currentUserHallId) : $currentUserHallId);
+                
+                if (!$hallId) {
+                    throw new \Exception("Hall ID not specified for the operation.");
+                }
 
-                // If super admin, check if first item has hall_id ?? fallback
-                // The current UI seems to default to selected hall context.
-
-                $hallId = auth()->user()->role === 'super_admin' ? ($request->students[0]['hall_id'] ?? $currentUserHallId) : $currentUserHallId;
-
-                // Get strictly sequentially
-                $hall = \App\Models\Hall::find($hallId);
+                $hall = \App\Models\Hall::findOrFail($hallId);
                 $prefix = $hall->prefix ?? 'MID';
 
                 $lastUser = User::where('hall_id', $hallId)
@@ -224,6 +237,42 @@ class StudentRegistrationController extends Controller
             \Illuminate\Support\Facades\Log::error('Bulk registration failed: ' . $e->getMessage());
             return back()->withErrors(['error' => 'Bulk registration failed. ' . $e->getMessage()]);
         }
+    }
+
+    public function exportPdf(Request $request)
+    {
+        $user = auth()->user();
+        $hallId = $user->hall_id;
+        $search = $request->input('search');
+
+        if ($user->role === 'super_admin') {
+            $hallId = $request->query('hall_id', \App\Models\Hall::first()?->id);
+        }
+
+        $hall = \App\Models\Hall::findOrFail($hallId);
+
+        $query = Student::with('user')
+            ->join('users', 'students.user_id', '=', 'users.id')
+            ->where('users.hall_id', $hallId)
+            ->select('students.*');
+
+        if ($search) {
+            $query->where(function ($q) use ($search) {
+                $q->where('students.student_id', 'like', "%{$search}%")
+                    ->orWhere('users.name', 'like', "%{$search}%")
+                    ->orWhere('users.unique_id', 'like', "%{$search}%");
+            });
+        }
+
+        $students = $query->orderBy('users.unique_id', 'asc')->get();
+
+        $pdf = Pdf::loadView('pdf.student-list', [
+            'students' => $students,
+            'hall' => $hall,
+            'date' => now()->format('d/m/Y'),
+        ]);
+
+        return $pdf->download('Student-List-' . ($hall->name ?? 'All') . '.pdf');
     }
 
     public function update(Request $request, Student $student)
