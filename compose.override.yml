@@ -1,0 +1,21 @@
+services:
+  app:
+    ports:
+      - "${APP_PORT:-8000}:80"
+    environment:
+      - APP_ENV=local
+      - APP_DEBUG=true
+    volumes:
+      # Optional bind mount if hot-reloading without container rebuild is needed
+      # - .:/app:cached
+      # - /app/vendor
+      # - /app/node_modules
+      - app_storage:/app/storage
+
+  mysql:
+    ports:
+      - "${DB_PORT:-3306}:3306"
+
+  redis:
+    ports:
+      - "${REDIS_PORT:-6379}:6379"

@@ -1,0 +1,148 @@
+services:
+  # ====================================
+  #         Laravel Application
+  # ====================================
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${APP_NAME:-laravel}_app:latest
+    container_name: ${APP_NAME:-laravel}_app
+    restart: unless-stopped
+    expose:
+      - "80"
+    environment:
+      - APP_NAME=${APP_NAME:-Laravel}
+      - APP_ENV=${APP_ENV:-production}
+      - APP_KEY=${APP_KEY}
+      - APP_DEBUG=${APP_DEBUG:-false}
+      - APP_URL=${APP_URL:-http://localhost}
+      - TZ=${TZ:-Asia/Dhaka}
+
+      - DB_CONNECTION=${DB_CONNECTION:-mysql}
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_DATABASE=${DB_DATABASE:-laravel}
+      - DB_USERNAME=${DB_USERNAME:-root}
+      - DB_PASSWORD=${DB_PASSWORD:-secret}
+
+      - REDIS_HOST=redis
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-null}
+      - REDIS_PORT=6379
+
+      - SESSION_DRIVER=${SESSION_DRIVER:-redis}
+      - SESSION_LIFETIME=${SESSION_LIFETIME:-120}
+      - QUEUE_CONNECTION=${QUEUE_CONNECTION:-redis}
+      - CACHE_STORE=${CACHE_STORE:-redis}
+      - BROADCAST_CONNECTION=${BROADCAST_CONNECTION:-log}
+      - FILESYSTEM_DISK=${FILESYSTEM_DISK:-local}
+      - TRUSTED_PROXIES=${TRUSTED_PROXIES:-*}
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          memory: 128M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - emp_network
+    volumes:
+      - app_storage:/app/storage
+
+  # ====================================
+  #         MySQL 8.0 Database
+  # ====================================
+  mysql:
+    image: mysql:8.0
+    container_name: ${APP_NAME:-laravel}_mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-secret}
+      MYSQL_DATABASE: ${DB_DATABASE:-laravel}
+      MYSQL_USER: ${DB_USERNAME:-root}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-secret}
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    command:
+      - --default-authentication-plugin=mysql_native_password
+      - --skip-name-resolve
+      - --max-connections=100
+      - --local-infile=0
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_PASSWORD:-secret}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - emp_network
+
+  # ====================================
+  #         Redis Cache
+  # ====================================
+  redis:
+    image: redis:7-alpine
+    container_name: ${APP_NAME:-laravel}_redis
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+        reservations:
+          memory: 64M
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    volumes:
+      - redis_data:/data
+    command: redis-server --save 60 1 --loglevel warning
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - emp_network
+
+networks:
+  emp_network:
+    driver: bridge
+
+volumes:
+  mysql_data:
+    driver: local
+  redis_data:
+    driver: local
+  app_storage:
+    driver: local
