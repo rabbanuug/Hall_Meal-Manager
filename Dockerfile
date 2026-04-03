@@ -31,8 +31,8 @@ COPY --from=composer_builder /app/vendor ./vendor
 # Build Vite assets
 RUN npm run build && npm prune --production
 
-# ── Stage 3: Runtime (alpine) ────────────────────────────────────────────────
-FROM php:8.4-cli-alpine
+# ── Stage 3: Runtime (PHP-FPM) ───────────────────────────────────────────────
+FROM php:8.4-fpm-alpine
 
 LABEL maintainer="team@example.com" \
       version="1.0.0" \
@@ -78,10 +78,11 @@ RUN mkdir -p bootstrap/cache \
 
 USER appuser
 
-EXPOSE 80
+EXPOSE 9000
 
-# Healthcheck using curl on the exposed port
+# Healthcheck: verify PHP-FPM is accepting connections on port 9000
+# Full app health (DB + Redis) is checked by Nginx via /health
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD curl -f http://localhost/up || exit 1
+  CMD nc -z 127.0.0.1 9000 || exit 1
 
-ENTRYPOINT ["/sbin/tini", "--", "php", "artisan", "serve", "--host=0.0.0.0", "--port=80"]
+ENTRYPOINT ["/sbin/tini", "--", "php-fpm"]

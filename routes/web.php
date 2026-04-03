@@ -3,9 +3,38 @@
 use App\Http\Controllers\Admin\MealRequestController;
 use App\Http\Controllers\Admin\StudentRegistrationController;
 use App\Http\Controllers\Student\MealBookingController;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 use Laravel\Fortify\Features;
+
+// Deep health check — verifies database and Redis connectivity
+// Used by Docker HEALTHCHECK and external uptime monitors
+Route::get('/health', function () {
+    $checks = [];
+
+    try {
+        DB::select('SELECT 1');
+        $checks['database'] = 'ok';
+    } catch (\Exception $e) {
+        $checks['database'] = 'fail';
+    }
+
+    try {
+        Cache::store('redis')->put('health_check', 1, 10);
+        $checks['redis'] = 'ok';
+    } catch (\Exception $e) {
+        $checks['redis'] = 'fail';
+    }
+
+    $checks['queue_backlog'] = DB::table('jobs')->count();
+    $checks['failed_jobs'] = DB::table('failed_jobs')->count();
+
+    $allOk = !in_array('fail', $checks);
+
+    return response()->json($checks, $allOk ? 200 : 503);
+})->name('health')->withoutMiddleware([\Illuminate\Foundation\Http\Middleware\VerifyCsrfToken::class]);
 
 Route::get('/', function () {
     return Inertia::render('welcome', [

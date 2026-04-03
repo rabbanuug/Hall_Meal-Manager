@@ -30,7 +30,7 @@ services:
         max-size: "5m"
         max-file: "3"
     depends_on:
-      app:
+      nginx:
         condition: service_healthy
     networks:
       - emp_network
