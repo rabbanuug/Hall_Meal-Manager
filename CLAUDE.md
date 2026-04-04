@@ -36,8 +36,10 @@ npm run dev
 ### Docker
 
 ```bash
-docker compose up                    # Local dev (with compose.override.yml)
-docker compose -f compose.prod.yml up  # Production with Cloudflare Tunnel
+docker compose up                                            # Local dev — compose.override.yml auto-applied
+docker compose -f compose.yml -f compose.prod.yml up -d     # Production (Nginx + Cloudflare Tunnel)
+docker exec <APP_NAME>_nginx nginx -s reload                 # Reload Nginx config without downtime
+docker exec <APP_NAME>_app php artisan queue:retry all       # Retry all failed jobs
 ```
 
 ### Testing & Linting
@@ -178,3 +180,12 @@ Development has no password requirements. Production enforces: minimum 12 charac
 
 ### User `unique_id` Auto-generation
 `User::booted()` auto-assigns `unique_id` as `MID-XXXXX` for all non-admin users on creation. When writing factories or seeders for student/teacher/staff users, do not set `unique_id` manually unless overriding is intentional.
+
+### Docker Infrastructure
+`MYSQL_USER` must NOT be `root` — MySQL 8 refuses to create a duplicate root user and the container errors on a fresh volume. Use a separate app username (default: `laravel`).
+
+`DB_ROOT_PASSWORD` (MySQL superuser) and `DB_PASSWORD` (app user) are separate `.env` vars — both required in production.
+
+`npm run build` must run before `npm run types` — Wayfinder generates TypeScript route bindings during the Vite build. Running `tsc` before building produces missing-module errors.
+
+Scheduler and queue containers are disabled in local dev (`profiles: donotstart` in `compose.override.yml`). Use `composer dev` locally instead. To test a scheduled command manually: `php artisan schedule:run`.
