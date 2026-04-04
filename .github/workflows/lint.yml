@@ -1,3 +1,37 @@
+# =============================================================================
+# Hall Meal Manager — lint.yml (code quality pipeline)
+# =============================================================================
+#
+# Runs on every push and pull request to develop and main.
+#
+# Purpose (SRE gate): Enforces consistent code style across PHP and TypeScript.
+# Style violations caught here prevent noisy diffs in feature PRs and keep
+# the codebase readable for on-call debugging.
+#
+# Tools and what they enforce:
+#   Laravel Pint    PHP style (preset: laravel — see pint.json). Enforces
+#                   spacing, import order, trailing commas, etc.
+#   Prettier        TypeScript/TSX/CSS formatting (see .prettierrc).
+#                   Includes prettier-plugin-tailwindcss (class sort order)
+#                   and prettier-plugin-organize-imports.
+#   ESLint          TypeScript linting with react-hooks rules. Catches
+#                   hook violations that the React Compiler enforces at
+#                   build time but not at authoring time.
+#
+# NOTE: The auto-commit step (stefanzweifel/git-auto-commit-action) is
+# intentionally commented out. If re-enabled, it will push style fixes
+# directly to the branch — useful but requires review of side effects
+# (e.g., pushing to protected branches, triggering extra CI runs).
+#
+# permissions: contents: write is present for when auto-commit is enabled.
+# If auto-commit stays disabled, this permission can be reduced to `read`.
+#
+# If this pipeline fails:
+#   PHP:        Run `./vendor/bin/pint` locally and commit the diff.
+#   Prettier:   Run `npm run format` locally and commit the diff.
+#   ESLint:     Run `npm run lint` locally — it auto-fixes most issues.
+# =============================================================================
+
 name: linter
 
 on:
@@ -10,6 +44,8 @@ on:
       - develop
       - main
 
+# Required if the commented-out auto-commit step is ever re-enabled.
+# Allows the workflow to push style-fix commits back to the branch.
 permissions:
   contents: write
 
@@ -17,11 +53,12 @@ jobs:
   quality:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v4
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
+          # Pint only needs one PHP version — no matrix needed here.
           php-version: '8.4'
 
       - name: Install Dependencies
@@ -29,15 +66,24 @@ jobs:
           composer install -q --no-ansi --no-interaction --no-scripts --no-progress --prefer-dist
           npm install
 
+      # Runs Laravel Pint with --parallel flag (set in composer.json lint script).
+      # Pint exits non-zero if any file would be changed — CI fails on violations.
       - name: Run Pint
         run: composer lint
 
+      # Prettier checks formatting of .ts, .tsx, .css files under resources/.
+      # Uses prettier-plugin-tailwindcss to enforce Tailwind class sort order.
       - name: Format Frontend
         run: npm run format
 
+      # ESLint with react-hooks plugin — catches hook rule violations that the
+      # React Compiler enforces strictly. Runs in --fix mode (npm run lint).
       - name: Lint Frontend
         run: npm run lint
 
+      # Auto-commit is disabled. If re-enabled, it will push Pint/Prettier/ESLint
+      # fixes back to the branch automatically. Requires `permissions: contents: write`.
+      # Uncomment only after confirming branch protection rules allow bot pushes.
       # - name: Commit Changes
       #   uses: stefanzweifel/git-auto-commit-action@v7
       #   with:

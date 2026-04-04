@@ -1,3 +1,32 @@
+# =============================================================================
+# Hall Meal Manager — tests.yml (CI test pipeline)
+# =============================================================================
+#
+# Runs on every push and pull request to develop and main.
+#
+# Purpose (SRE gate): Prevents broken builds from reaching production.
+# Failures here block merges — treat them as reliability signals, not
+# just developer feedback.
+#
+# Matrix: PHP 8.4 and 8.5 — both versions must pass before merging.
+# This catches extension compatibility issues early (e.g. pecl/redis).
+#
+# Test environment (from phpunit.xml — no manual setup needed):
+#   DB_CONNECTION=sqlite (in-memory)   No MySQL container required in CI.
+#   QUEUE_CONNECTION=sync              Jobs run inline, no worker needed.
+#   CACHE_STORE=array                  No Redis required in CI.
+#
+# TypeScript type check is included here (not just in lint.yml) because type
+# errors are a reliability risk — they can cause runtime failures in the
+# Inertia/React layer that Pest tests won't catch.
+#
+# If this pipeline fails:
+#   1. Check the failing step in the Actions UI.
+#   2. For PHP matrix failures: run `./vendor/bin/pest` locally.
+#   3. For TypeScript failures: run `npm run types` locally.
+#   4. Do not merge until both matrix legs pass.
+# =============================================================================
+
 name: tests
 
 on:
@@ -13,6 +42,8 @@ on:
 jobs:
   ci:
     runs-on: ubuntu-latest
+    # Test against both supported PHP versions.
+    # PHP 8.5 may surface deprecation warnings that 8.4 silences.
     strategy:
       matrix:
         php-version: ['8.4', '8.5']
@@ -26,6 +57,8 @@ jobs:
         with:
           php-version: ${{ matrix.php-version }}
           tools: composer:v2
+          # xdebug: enables code coverage reporting if added in future.
+          # Kept here so coverage flags work without config changes later.
           coverage: xdebug
 
       - name: Setup Node
@@ -33,20 +66,35 @@ jobs:
         with:
           node-version: '22'
 
+      # npm ci: installs from package-lock.json exactly.
+      # Deterministic — prevents "works locally, fails in CI" from dep drift.
       - name: Install Node Dependencies
-        run: npm i
+        run: npm ci
 
       - name: Install Dependencies
         run: composer install --no-interaction --prefer-dist --optimize-autoloader
 
+      # Build Vite assets before type check — the Wayfinder plugin generates
+      # TypeScript route bindings during build. Without this, npm run types
+      # will fail with missing module errors.
       - name: Build Assets
         run: npm run build
 
+      # Catches TypeScript errors in React/Inertia pages before they ship.
+      # Runs tsc --noEmit against the full project (tsconfig.json).
+      # Wayfinder bindings (generated above) must exist for this to pass.
+      - name: TypeScript Type Check
+        run: npm run types
+
+      # Tests use in-memory SQLite + sync queue (phpunit.xml).
+      # No external DB or Redis service container needed.
       - name: Copy Environment File
         run: cp .env.example .env
 
       - name: Generate Application Key
         run: php artisan key:generate
 
+      # Pest runs all tests in tests/Feature/ and tests/Unit/.
+      # RefreshDatabase trait is used — each test gets a clean SQLite DB.
       - name: Tests
         run: ./vendor/bin/pest
