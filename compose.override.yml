@@ -1,21 +1,57 @@
+# =============================================================================
+# Hall Meal Manager — compose.override.yml (local development overrides)
+# =============================================================================
+#
+# Docker Compose applies this file automatically on top of compose.yml when
+# running `docker compose up` locally (no -f flag needed).
+#
+# DO NOT use this file in production. The production stack is:
+#   docker compose -f compose.yml -f compose.prod.yml up -d
+#
+# What this file does:
+#   1. Sets APP_ENV=local and APP_DEBUG=true on the app service.
+#   2. Exposes Nginx on APP_PORT (default 8000) for localhost access.
+#   3. Exposes MySQL and Redis ports for local tooling (TablePlus, redis-cli).
+#   4. Disables the scheduler and queue services — use `composer dev` instead,
+#      which starts queue:listen in the same terminal alongside artisan serve.
+#
+# Access the app locally: http://localhost:8000
+# =============================================================================
+
 services:
   app:
-    ports:
-      - "${APP_PORT:-8000}:80"
     environment:
       - APP_ENV=local
       - APP_DEBUG=true
-    volumes:
-      # Optional bind mount if hot-reloading without container rebuild is needed
-      # - .:/app:cached
-      # - /app/vendor
-      # - /app/node_modules
-      - app_storage:/app/storage
 
+  # Expose Nginx on the host so the browser can reach the app.
+  # The app container exposes PHP-FPM on port 9000 (internal only) —
+  # do NOT map app:9000 to the host; always go through Nginx.
+  nginx:
+    ports:
+      - "${APP_PORT:-8000}:80"
+
+  # Scheduler and queue are disabled in local dev.
+  # The `donotstart` profile is never activated, so these services are
+  # effectively excluded from `docker compose up`.
+  # Reason: compose dev runs queue:listen directly in the terminal,
+  # and the scheduler is not needed for day-to-day feature development.
+  # To test scheduled commands locally, run: php artisan schedule:run
+  scheduler:
+    profiles:
+      - donotstart
+  queue:
+    profiles:
+      - donotstart
+
+  # Expose MySQL for local DB clients (TablePlus, DBeaver, etc.).
+  # Default: localhost:3306. Override with DB_PORT in .env if port conflicts.
   mysql:
     ports:
       - "${DB_PORT:-3306}:3306"
 
+  # Expose Redis for local inspection (redis-cli, RedisInsight).
+  # Default: localhost:6379. Override with REDIS_PORT in .env if needed.
   redis:
     ports:
       - "${REDIS_PORT:-6379}:6379"

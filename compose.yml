@@ -1,7 +1,46 @@
+# =============================================================================
+# Hall Meal Manager — compose.yml (base configuration)
+# =============================================================================
+#
+# This is the BASE compose file. It is always loaded.
+# Layer additional files on top for environment-specific overrides:
+#
+#   Local dev:    docker compose up
+#                 (compose.override.yml is auto-applied by Docker Compose)
+#
+#   Production:   docker compose -f compose.yml -f compose.prod.yml up -d
+#
+# Service dependency chain (startup order):
+#   mysql + redis  →  app (PHP-FPM)  →  nginx  →  cloudflared (prod only)
+#                                    ↳  scheduler
+#                                    ↳  queue
+#
+# All services share emp_network (bridge). Only Nginx exposes port 80
+# externally (via compose.override.yml in dev, Cloudflare Tunnel in prod).
+#
+# Required .env variables (copy .env.example → .env):
+#   APP_KEY, DB_PASSWORD, DB_ROOT_PASSWORD, REDIS_PASSWORD, APP_URL
+# =============================================================================
+
 services:
-  # ====================================
-  #         Laravel Application
-  # ====================================
+  # ============================================================================
+  # app — PHP-FPM (Laravel application process)
+  # ============================================================================
+  # Runs PHP-FPM on port 9000 (internal only). Nginx proxies all PHP requests
+  # here. This service is also the base image for scheduler and queue — they
+  # reuse the same image but override the command.
+  #
+  # Health check: nc -z 127.0.0.1 9000 (TCP socket open check).
+  # Full dependency health (DB + Redis) is verified at the /health route.
+  #
+  # Resource limits: 1 CPU / 512MB RAM.
+  # Watch for memory pressure during PDF exports (DomPDF) — each export can
+  # consume 50–100MB temporarily. If OOM kills occur, raise memory limit here.
+  #
+  # Volumes:
+  #   app_storage  — Laravel logs, sessions, cache, file uploads (persisted)
+  #   app_public   — Vite-built assets shared with Nginx (read-only for Nginx)
+  # ============================================================================
   app:
     build:
       context: .
@@ -23,7 +62,7 @@ services:
       - DB_HOST=mysql
       - DB_PORT=3306
       - DB_DATABASE=${DB_DATABASE:-laravel}
-      - DB_USERNAME=${DB_USERNAME:-root}
+      - DB_USERNAME=${DB_USERNAME:-laravel}
       - DB_PASSWORD=${DB_PASSWORD:-secret}
 
       - REDIS_HOST=redis
@@ -36,6 +75,8 @@ services:
       - CACHE_STORE=${CACHE_STORE:-redis}
       - BROADCAST_CONNECTION=${BROADCAST_CONNECTION:-log}
       - FILESYSTEM_DISK=${FILESYSTEM_DISK:-local}
+      # TRUSTED_PROXIES=* allows Laravel to trust X-Forwarded-Proto from Nginx.
+      # Required for https:// URL generation and Secure session cookies.
       - TRUSTED_PROXIES=${TRUSTED_PROXIES:-*}
     security_opt:
       - no-new-privileges:true
@@ -60,11 +101,26 @@ services:
       - emp_network
     volumes:
       - app_storage:/app/storage
+      # app_public is also mounted by Nginx (read-only) to serve static files
+      # directly from disk, bypassing PHP-FPM entirely.
       - app_public:/app/public
 
-  # ====================================
-  #         Nginx
-  # ====================================
+  # ============================================================================
+  # nginx — Reverse proxy + static file server
+  # ============================================================================
+  # Sits in front of PHP-FPM. Responsibilities:
+  #   1. Serve Vite build assets (/build/*) directly from app_public volume
+  #      with 1-year immutable cache headers (content-hashed filenames).
+  #   2. Proxy all PHP requests to app:9000 via FastCGI.
+  #   3. Set HTTPS=on + X-Forwarded-Proto=https headers for Laravel (Cloudflare
+  #      terminates TLS; Nginx forwards the context).
+  #   4. Apply gzip compression and security headers.
+  #   5. Serve the /health endpoint (used by cloudflared depends_on check).
+  #
+  # Config: nginx/default.conf (mounted read-only)
+  # Health check: curl /health (verifies DB + Redis via Laravel)
+  # Resource limits: 0.5 CPU / 64MB RAM (static file serving is cheap).
+  # ============================================================================
   nginx:
     image: nginx:1.27-alpine
     container_name: ${APP_NAME:-laravel}_nginx
@@ -100,9 +156,21 @@ services:
     networks:
       - emp_network
 
-  # ====================================
-  #         Scheduler
-  # ====================================
+  # ============================================================================
+  # scheduler — Laravel task scheduler (artisan schedule:work)
+  # ============================================================================
+  # Runs the Laravel scheduler loop (replaces a system cron).
+  # Registered schedules (routes/console.php):
+  #   - meal:check-dues     Daily 02:00 Asia/Dhaka — cancels future bookings
+  #                         for students with negative balance > 2 months.
+  #   - monitor-failed-jobs Every 15 minutes — logs error if failed_jobs > 0.
+  #
+  # Uses the same image as `app` — no separate build needed.
+  # Disabled in local dev via compose.override.yml (profiles: donotstart).
+  # Use `composer dev` locally which starts queue:listen directly.
+  #
+  # Resource limits: 0.25 CPU / 128MB RAM (low — runs infrequently).
+  # ============================================================================
   scheduler:
     image: ${APP_NAME:-laravel}_app:latest
     container_name: ${APP_NAME:-laravel}_scheduler
@@ -119,7 +187,7 @@ services:
       - DB_HOST=mysql
       - DB_PORT=3306
       - DB_DATABASE=${DB_DATABASE:-laravel}
-      - DB_USERNAME=${DB_USERNAME:-root}
+      - DB_USERNAME=${DB_USERNAME:-laravel}
       - DB_PASSWORD=${DB_PASSWORD:-secret}
       - REDIS_HOST=redis
       - REDIS_PASSWORD=${REDIS_PASSWORD:-null}
@@ -149,9 +217,25 @@ services:
     volumes:
       - app_storage:/app/storage
 
-  # ====================================
-  #         Queue Worker
-  # ====================================
+  # ============================================================================
+  # queue — Laravel queue worker (artisan queue:work)
+  # ============================================================================
+  # Processes jobs from the Redis queue.
+  # Currently no application jobs are dispatched (app/Jobs/ is empty),
+  # but this worker is ready for when async jobs are added.
+  #
+  # Worker flags:
+  #   --tries=3      Retry a failed job up to 3 times before moving to failed_jobs.
+  #   --backoff=5    Wait 5 seconds between retry attempts.
+  #   --max-time=3600 Restart worker process every hour to prevent memory leaks.
+  #
+  # Failed jobs land in the failed_jobs table. The scheduler monitors this
+  # every 15 minutes and logs an error. Retry manually:
+  #   docker exec <app_container> php artisan queue:retry all
+  #
+  # Disabled in local dev via compose.override.yml (profiles: donotstart).
+  # Resource limits: 0.5 CPU / 256MB RAM.
+  # ============================================================================
   queue:
     image: ${APP_NAME:-laravel}_app:latest
     container_name: ${APP_NAME:-laravel}_queue
@@ -168,7 +252,7 @@ services:
       - DB_HOST=mysql
       - DB_PORT=3306
       - DB_DATABASE=${DB_DATABASE:-laravel}
-      - DB_USERNAME=${DB_USERNAME:-root}
+      - DB_USERNAME=${DB_USERNAME:-laravel}
       - DB_PASSWORD=${DB_PASSWORD:-secret}
       - REDIS_HOST=redis
       - REDIS_PASSWORD=${REDIS_PASSWORD:-null}
@@ -198,17 +282,38 @@ services:
     volumes:
       - app_storage:/app/storage
 
-  # ====================================
-  #         MySQL 8.0 Database
-  # ====================================
+  # ============================================================================
+  # mysql — MySQL 8.0 database
+  # ============================================================================
+  # Stores all application data. Named volume mysql_data persists across
+  # container restarts. Destroying this volume loses all data — back it up
+  # before running `docker compose down -v`.
+  #
+  # Users:
+  #   root    MYSQL_ROOT_PASSWORD (DB_ROOT_PASSWORD in .env) — superuser,
+  #           used only by the healthcheck ping.
+  #   laravel MYSQL_USER + MYSQL_PASSWORD — the app's database user.
+  #           DB_USERNAME must NOT be 'root' — MySQL refuses to create a
+  #           duplicate root user and the container entrypoint will error.
+  #
+  # Tuning flags:
+  #   --max-connections=100   Matches expected load for a university hall app.
+  #   --local-infile=0        Disables LOAD DATA LOCAL INFILE (security).
+  #   --skip-name-resolve     Faster connection setup (no DNS lookup).
+  #
+  # Health check: mysqladmin ping via root. Service is only considered healthy
+  # when MySQL is accepting connections, not just when the process is up.
+  # ============================================================================
   mysql:
     image: mysql:8.0
     container_name: ${APP_NAME:-laravel}_mysql
     restart: unless-stopped
     environment:
-      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-secret}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-secret}
       MYSQL_DATABASE: ${DB_DATABASE:-laravel}
-      MYSQL_USER: ${DB_USERNAME:-root}
+      # MYSQL_USER must NOT be 'root' — root is created automatically.
+      # Use a separate app user; update DB_USERNAME/DB_PASSWORD in .env accordingly.
+      MYSQL_USER: ${DB_USERNAME:-laravel}
       MYSQL_PASSWORD: ${DB_PASSWORD:-secret}
     security_opt:
       - no-new-privileges:true
@@ -232,7 +337,7 @@ services:
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_PASSWORD:-secret}"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${DB_ROOT_PASSWORD:-secret}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -240,9 +345,20 @@ services:
     networks:
       - emp_network
 
-  # ====================================
-  #         Redis Cache
-  # ====================================
+  # ============================================================================
+  # redis — Redis 7 (cache, sessions, queue)
+  # ============================================================================
+  # Used for three Laravel drivers: cache (CACHE_STORE), session
+  # (SESSION_DRIVER), and queue (QUEUE_CONNECTION). All three are configured
+  # to use Redis in production (compose.yml defaults).
+  #
+  # Persistence: --save 60 1 triggers an RDB snapshot every 60 seconds if at
+  # least 1 key changed. This provides crash recovery for session data.
+  # For stricter durability (queue jobs), consider adding --appendonly yes.
+  #
+  # Health check: redis-cli ping (returns PONG when ready).
+  # Resource limits: 0.5 CPU / 256MB RAM.
+  # ============================================================================
   redis:
     image: redis:7-alpine
     container_name: ${APP_NAME:-laravel}_redis
@@ -283,5 +399,8 @@ volumes:
     driver: local
   app_storage:
     driver: local
+  # app_public: shared between app (write) and nginx (read-only).
+  # Docker initialises the volume from app's /app/public on first start,
+  # making Vite-built assets available to Nginx without a bind mount.
   app_public:
     driver: local

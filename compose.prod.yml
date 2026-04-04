@@ -1,14 +1,63 @@
+# =============================================================================
+# Hall Meal Manager — compose.prod.yml (production overrides)
+# =============================================================================
+#
+# Layered on top of compose.yml for production deployments.
+#
+# Usage:
+#   docker compose -f compose.yml -f compose.prod.yml up -d
+#
+# This file:
+#   1. Forces APP_ENV=production and APP_DEBUG=false on the app service.
+#   2. Adds the Cloudflare Tunnel (cloudflared) service which routes public
+#      HTTPS traffic into the emp_network without exposing any host ports.
+#
+# Traffic flow in production:
+#   Internet (HTTPS) → Cloudflare Edge → Cloudflare Tunnel (cloudflared)
+#   → nginx:80 (inside emp_network) → app:9000 (PHP-FPM)
+#
+# Scheduler and queue services run normally in production (no profile override).
+# They are disabled in local dev via compose.override.yml.
+#
+# Required additional .env variables for production:
+#   CLOUDFLARE_TUNNEL_TOKEN   From Cloudflare Zero Trust dashboard
+#   APP_URL                   https://yourdomain.com
+# =============================================================================
+
 services:
+  # Override app defaults for production safety.
+  # All other app settings come from compose.yml.
   app:
     environment:
       - APP_ENV=production
       - APP_DEBUG=false
 
-  # ====================================
-  #         Cloudflare Tunnel
-  # ====================================
+  # ============================================================================
+  # cloudflared — Cloudflare Tunnel
+  # ============================================================================
+  # Establishes an outbound-only tunnel from this server to Cloudflare's edge.
+  # No inbound ports are opened on the host — eliminates the need for firewall
+  # rules and TLS certificate management on the server.
+  #
+  # TLS termination happens at Cloudflare's edge. Inside the tunnel, traffic
+  # is plain HTTP. Nginx forwards HTTPS context to PHP-FPM via fastcgi_param
+  # so Laravel generates correct https:// URLs.
+  #
+  # Startup dependency: waits for nginx service_healthy before connecting.
+  # This ensures the full stack (mysql → redis → app → nginx) is ready before
+  # Cloudflare starts routing traffic in.
+  #
+  # Pinned version: update cloudflared deliberately — do not use :latest in
+  # production. Check https://github.com/cloudflare/cloudflared/releases.
+  #
+  # Security hardening:
+  #   read_only: true          Container filesystem is read-only.
+  #   no-new-privileges: true  Prevents privilege escalation via setuid binaries.
+  #
+  # Resource limits: 0.5 CPU / 256MB RAM (tunnel is network I/O, not compute).
+  # ============================================================================
   cloudflared:
-    image: cloudflare/cloudflared:latest
+    image: cloudflare/cloudflared:2025.4.0  # pin version; update deliberately
     container_name: ${APP_NAME:-laravel}_tunnel
     restart: unless-stopped
     command: tunnel --no-autoupdate run
